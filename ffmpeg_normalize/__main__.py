@@ -451,8 +451,9 @@ def _split_options(opts):
     return ret
 
 
-def main():
-    cli_args = create_parser().parse_args()
+def main(args=None):
+    # Allow arguments to be passed directly, otherwise args will be read from sys.argv
+    cli_args = create_parser().parse_args(args)
 
     if cli_args.quiet:
         logger.setLevel(logging.ERROR)
