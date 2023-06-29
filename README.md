@@ -1,6 +1,12 @@
 # ffmpeg-normalize
 
-[![PyPI version](https://img.shields.io/pypi/v/ffmpeg-normalize.svg)](https://pypi.org/project/ffmpeg-normalize) [![Python package](https://github.com/slhck/ffmpeg-normalize/actions/workflows/python-package.yml/badge.svg)](https://github.com/slhck/ffmpeg-normalize/actions/workflows/python-package.yml)
+<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+[![All Contributors](https://img.shields.io/badge/all_contributors-18-orange.svg?style=flat-square)](#contributors-)
+<!-- ALL-CONTRIBUTORS-BADGE:END -->
+
+[![PyPI version](https://img.shields.io/pypi/v/ffmpeg-normalize.svg)](https://pypi.org/project/ffmpeg-normalize)
+
+[![Python package](https://github.com/slhck/ffmpeg-normalize/actions/workflows/python-package.yml/badge.svg)](https://github.com/slhck/ffmpeg-normalize/actions/workflows/python-package.yml)
 
 A utility for batch-normalizing audio using ffmpeg.
 
@@ -10,62 +16,131 @@ Batch processing of several input files is possible, including video files.
 
 **A very quick how-to:**
 
-1. Install ffmpeg
+1. Install a recent version of [ffmpeg](https://ffmpeg.org/download.html)
 2. Run `pip3 install ffmpeg-normalize`
 3. Run `ffmpeg-normalize /path/to/your/file.mp4`
-4. Done! 🎧
+4. Done! 🎧 (the file will be in a folder called `normalized`)
 
 Read on for more info.
 
 **Contents:**
 
 - [Requirements](#requirements)
+  - [ffmpeg](#ffmpeg)
 - [Installation](#installation)
 - [Usage](#usage)
 - [Description](#description)
 - [Examples](#examples)
 - [Detailed Options](#detailed-options)
-    - [File Input/Output](#file-inputoutput)
-    - [General](#general)
-    - [Normalization](#normalization)
-    - [EBU R128 Normalization](#ebu-r128-normalization)
-    - [Audio Encoding](#audio-encoding)
-    - [Other Encoding Options](#other-encoding-options)
-    - [Output Format](#output-format)
-    - [Environment Variables](#environment-variables)
+  - [File Input/Output](#file-inputoutput)
+  - [General](#general)
+  - [Normalization](#normalization)
+  - [EBU R128 Normalization](#ebu-r128-normalization)
+  - [Audio Encoding](#audio-encoding)
+  - [Other Encoding Options](#other-encoding-options)
+  - [Input/Output Format](#inputoutput-format)
+  - [Environment Variables](#environment-variables)
+- [API](#api)
 - [FAQ](#faq)
+  - [The program doesn't work because the "loudnorm" filter can't be found](#the-program-doesnt-work-because-the-loudnorm-filter-cant-be-found)
+  - [Should I use this to normalize my music collection?](#should-i-use-this-to-normalize-my-music-collection)
+  - [Why are my output files MKV?](#why-are-my-output-files-mkv)
+  - ["Could not write header for output file" error](#could-not-write-header-for-output-file-error)
+  - [The conversion does not work and I get a cryptic ffmpeg error!](#the-conversion-does-not-work-and-i-get-a-cryptic-ffmpeg-error)
+  - [What are the different normalization algorithms?](#what-are-the-different-normalization-algorithms)
+  - [Couldn't I just run `loudnorm` with ffmpeg?](#couldnt-i-just-run-loudnorm-with-ffmpeg)
+  - [What about speech?](#what-about-speech)
+  - [After updating, this program does not work as expected anymore!](#after-updating-this-program-does-not-work-as-expected-anymore)
+  - [Can I buy you a beer / coffee / random drink?](#can-i-buy-you-a-beer--coffee--random-drink)
+- [Related Tools and Articles](#related-tools-and-articles)
+- [Contributors](#contributors)
+- [License](#license)
 
 -------------
 
 ## Requirements
 
--   Python 3.6 or higher
--   ffmpeg v3.1 or above from <http://ffmpeg.org/> installed in your \$PATH
+You need Python 3.8 or higher.
+
+### ffmpeg
+
+- ffmpeg 5.x is required, ffmpeg 6.x is recommended (it fixes [a bug for short files](https://github.com/slhck/ffmpeg-normalize/issues/87))
+- Download a [static build](https://ffmpeg.org/download.html) for your system
+- Place the `ffmpeg` executable in your `$PATH`, or specify the path to the binary with the `FFMPEG_PATH` environment variable in `ffmpeg-normalize`
+
+For instance, under Linux:
+
+```bash
+wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+mkdir -p ffmpeg
+tar -xf ffmpeg-release-amd64-static.tar.xz -C ffmpeg --strip-components=1
+sudo cp ffmpeg/ffmpeg /usr/local/bin
+sudo cp ffmpeg/ffprobe /usr/local/bin
+sudo chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
+```
+
+For Windows, follow [this guide](https://www.wikihow.com/Install-FFmpeg-on-Windows).
+
+For macOS and Linux, you can also use [Homebrew](https://brew.sh):
+
+```bash
+brew install ffmpeg
+```
+
+Note that using distribution packages (e.g., `apt install ffmpeg`) is not recommended, as these are often outdated.
 
 ## Installation
 
-    pip3 install ffmpeg-normalize
+For Python 3 and pip:
 
-Or download this repository, then run `pip install .`.
+```bash
+pip3 install ffmpeg-normalize
+```
+
+Or download this repository, then run `pip3 install .`.
+
+## Docker Build
+Download this repository and run
+
+```
+docker build -t ffmpeg-normalize .
+```
+
+Run using Windows Powershell or Linux:
+```
+docker run  -v "$(pwd):/tmp" -it ffmpeg-normalize /bin/sh
+```
+This will mount your current folder to the /tmp directory inside the container
+
+Note: The container will run in interactive mode.
+
+Example Usage:
+
+```
+PS C:\yonkers> docker run  -v "$(pwd):/tmp" -it ffmpeg-normalize /bin/sh
+/ # cd /tmp
+/tmp # ls
+01. Goblin.mp3
+/tmp # ffmpeg-normalize "01. Goblin.mp3" -f -c:a libmp3lame -b:a 320k --target-level -13 --output "01. Goblin normalized.mp3"
+WARNING: The chosen output extension mp3 does not support video/cover art. It will be disabled.
+/tmp # ls
+01. Goblin normalized.mp3
+01. Goblin.mp3
+```
 
 ## Usage
 
-    ffmpeg-normalize input [input ...]
-                [-h]
-                [-o OUTPUT [OUTPUT ...]] [-of OUTPUT_FOLDER]
-                [-f] [-d] [-v] [-q] [-n] [-pr]
-                [--version]
-                [-nt {ebu,rms,peak}] [-t TARGET_LEVEL] [-p]
-                [-lrt LOUDNESS_RANGE_TARGET] [-tp TRUE_PEAK] [--offset OFFSET] [--dual-mono]
-                [-c:a AUDIO_CODEC] [-b:a AUDIO_BITRATE] [-ar SAMPLE_RATE] [-koa]
-                [-prf PRE_FILTER] [-pof POST_FILTER]
-                [-vn] [-c:v VIDEO_CODEC]
-                [-sn] [-mn] [-cn]
-                [-ei EXTRA_INPUT_OPTIONS] [-e EXTRA_OUTPUT_OPTIONS]
-                [-ofmt OUTPUT_FORMAT]
-                [-ext EXTENSION]
+```bash
+ffmpeg-normalize input [input ...][-h][-o OUTPUT [OUTPUT ...]] [options]
+```
 
-For more information, run `ffmpeg-normalize -h`, or read on.
+Example:
+
+```bash
+ffmpeg-normalize 1.wav 2.wav -o 1-normalized.m4a 2-normalized.m4a -c:a aac -b:a 192k
+```
+
+For more information on the options (`[options]`) available, run `ffmpeg-normalize -h`, or read on.
 
 ## Description
 
@@ -99,7 +174,7 @@ By default, all streams from the input file will be written to the output file. 
 
 **How will the normalization be done?**
 
-The normalization will be performed with the [`loudnorm` filter](http://ffmpeg.org/ffmpeg-filters.html#loudnorm) from FFmpeg, which was [originally written by Kyle Swanson](https://k.ylo.ph/2016/04/04/loudnorm.html). It will bring the audio to a specified target level. This ensures that multiple files normalized with this filter will have the same perceived loudness.
+The normalization will be performed with the [`loudnorm` filter](https://ffmpeg.org/ffmpeg-filters.html#loudnorm) from FFmpeg, which was [originally written by Kyle Swanson](https://k.ylo.ph/2016/04/04/loudnorm.html). It will bring the audio to a specified target level. This ensures that multiple files normalized with this filter will have the same perceived loudness.
 
 **What codec is chosen?**
 
@@ -109,7 +184,7 @@ Some containers (like MP4) also cannot handle PCM audio. If you want to use such
 
 ## Examples
 
-[Read the examples on the the wiki.](https://github.com/slhck/ffmpeg-normalize/wiki/examples)
+[Read the examples on the wiki.](https://github.com/slhck/ffmpeg-normalize/wiki/examples)
 
 ## Detailed Options
 
@@ -168,7 +243,16 @@ Some containers (like MP4) also cannot handle PCM audio. If you want to use such
 
 - `-lrt LOUDNESS_RANGE_TARGET, --loudness-range-target LOUDNESS_RANGE_TARGET`: EBU Loudness Range Target in LUFS (default: 7.0).
 
-    Range is 1.0 - 20.0.
+    Range is 1.0 - 50.0.
+
+- `--keep-loudness-range-target`: Keep the input loudness range target to allow for linear normalization.
+
+- `--keep-lra-above-loudness-range-target`: Keep input loudness range above loudness range target.
+
+  - `LOUDNESS_RANGE_TARGET` for input loudness range `<= LOUDNESS_RANGE_TARGET` or
+  - keep input loudness range target above `LOUDNESS_RANGE_TARGET`.
+
+  as alternative to `--keep-loudness-range-target` to allow for linear normalization.
 
 - `-tp TRUE_PEAK, --true-peak TRUE_PEAK`: EBU Maximum True Peak in dBTP (default: -2.0).
 
@@ -183,6 +267,12 @@ Some containers (like MP4) also cannot handle PCM audio. If you want to use such
 - `--dual-mono`: Treat mono input files as "dual-mono".
 
     If a mono file is intended for playback on a stereo system, its EBU R128 measurement will be perceptually incorrect. If set, this option will compensate for this effect. Multi-channel input files are not affected by this option.
+
+- `--dynamic`: Force dynamic normalization mode.
+
+    Instead of applying linear EBU R128 normalization, choose a dynamic normalization. This is not usually recommended.
+
+    Dynamic mode will automatically change the sample rate to 192 kHz. Use -ar/--sample-rate to specify a different output sample rate.
 
 ### Audio Encoding
 
@@ -239,7 +329,7 @@ Some containers (like MP4) also cannot handle PCM audio. If you want to use such
 
     If JSON is used, you need to wrap the whole argument in quotes to prevent shell expansion and to preserve literal quotes inside the string. If a simple string is used, you need to specify the argument with `-e=`.
 
-    Examples: `-e '[ "-f", "mpegts" ]'` or `-e="-f mpegts"`
+    Examples: `-ei '[ "-f", "mpegts", "-r", "24" ]'` or `-ei="-f mpegts -r 24"`
 
 - `-e EXTRA_OUTPUT_OPTIONS, --extra-output-options EXTRA_OUTPUT_OPTIONS`: Extra output options list.
 
@@ -249,7 +339,7 @@ Some containers (like MP4) also cannot handle PCM audio. If you want to use such
 
     If JSON is used, you need to wrap the whole argument in quotes to prevent shell expansion and to preserve literal quotes inside the string. If a simple string is used, you need to specify the argument with `-e=`.
 
-    Examples: `-e '[ "-vbr", "3" ]'` or `-e="-vbr 3"`
+    Examples: `-e '[ "-vbr", "3", "-preset:v", "ultrafast" ]'` or `-e="-vbr 3 -preset:v ultrafast"`
 
 - `-ofmt OUTPUT_FORMAT, --output-format OUTPUT_FORMAT`: Media format to use for output file(s).
 
@@ -274,12 +364,17 @@ The program additionally respects environment variables:
     Sets the full path to an `ffmpeg` executable other than
     the system default or you can provide a file name available on $PATH
 
+## API
+
+This program has a simple API that can be used to integrate it into other Python programs.
+
+For more information see the [API documentation](https://htmlpreview.github.io/?https://github.com/slhck/ffmpeg-normalize/blob/master/docs/ffmpeg_normalize.html).
 
 ## FAQ
 
 ### The program doesn't work because the "loudnorm" filter can't be found
 
-Make sure you run ffmpeg v3.1 or higher and that `loudnorm` is part of the output when you run `ffmpeg -filters`. Many distributions package outdated ffmpeg 2.x versions, or (even worse), Libav's `ffmpeg` disguising as a real `ffmpeg` from the FFmpeg project.
+Make sure you run a recent ffmpeg version and that `loudnorm` is part of the output when you run `ffmpeg -filters`. Many distributions package outdated ffmpeg versions, or (even worse), Libav's `ffmpeg` disguising as a real `ffmpeg` from the FFmpeg project.
 
 Some ffmpeg builds also do not have the `loudnorm` filter enabled.
 
@@ -295,17 +390,31 @@ When you run `ffmpeg-normalize` and re-encode files with MP3 or AAC, you will in
 
 I chose MKV as a default output container since it handles almost every possible combination of audio, video, and subtitle codecs. If you know which audio/video codec you want, and which container is supported, use the output options to specify the encoder and output file name manually.
 
+### "Could not write header for output file" error
+
+See the [next section](#the-conversion-does-not-work-and-i-get-a-cryptic-ffmpeg-error).
+
 ### The conversion does not work and I get a cryptic ffmpeg error!
 
-One possible reason is that the input file contains some streams that cannot be mapped to the output file. Examples:
+Maybe ffmpeg says something like:
+
+> Could not write header for output file #0 (incorrect codec parameters ?): Invalid argument
+
+Or the program says:
+
+> … Please choose a suitable audio codec with the `-c:a` option.
+
+One possible reason is that the input file contains some streams that cannot be mapped to the output file, or that you are using a codec that does not work for the output file. Examples:
 
 - You are trying to normalize a movie file, writing to a `.wav` or `.mp3` file. WAV/MP3 files only support audio, not video. Disable video and subtitles with `-vn` and `-sn`, or choose a container that supports video (e.g. `.mkv`).
 
-- You are trying to normalize a file, writing to an `.mp4` container. This program defaults to PCM audio, but MP4 does not support PCM audio. Make sure that your audio codec is set to something MP4 containers support (e.g. `-c:a aac).
+- You are trying to normalize a file, writing to an `.mp4` container. This program defaults to PCM audio, but MP4 does not support PCM audio. Make sure that your audio codec is set to something MP4 containers support (e.g. `-c:a aac`).
 
 The default output container is `.mkv` as it will support most input stream types. If you want a different output container, [make sure that it supports](https://en.wikipedia.org/wiki/Comparison_of_container_file_formats) your input file's video, audio, and subtitle streams (if any).
 
 Also, if there is some other broken metadata, you can try to disable copying over of metadata with `-mn`.
+
+Finally, make sure you use a recent version of ffmpeg. The [static builds](https://ffmpeg.org/download.html) are usually the best option.
 
 ### What are the different normalization algorithms?
 
@@ -317,7 +426,21 @@ Also, if there is some other broken metadata, you can try to disable copying ove
 
 ### Couldn't I just run `loudnorm` with ffmpeg?
 
-You absolutely can. However, you can get better accuracy and linear normalization with two passes of the filter. Since ffmpeg does not allow you to automatically run these two passes, you have to do it yourself and parse the output values from the first run. If this program is too over-engineered for you, you could also use an approach such as featured [in this Ruby script](https://gist.github.com/kylophone/84ba07f6205895e65c9634a956bf6d54) that performs the two `loudnorm` passes.
+You absolutely can. However, you can get better accuracy and linear normalization with two passes of the filter. Since ffmpeg does not allow you to automatically run these two passes, you have to do it yourself and parse the output values from the first run.
+
+If ffmpeg-normalize is too over-engineered for you, you could also use an approach such as featured [in this Ruby script](https://gist.github.com/kylophone/84ba07f6205895e65c9634a956bf6d54) that performs the two `loudnorm` passes.
+
+If you want dynamic normalization (the loudnorm default), simply use ffmpeg with one pass, e.g.:
+
+```bash
+ffmpeg -i input.mp3 -af loudnorm -c:a aac -b:a 192k output.m4a
+```
+
+### What about speech?
+
+You should check out the `speechnorm` filter that is part of ffmpeg. It is a designed to be used in one pass, so you don't need this script at all.
+
+See [the documentation](https://ffmpeg.org/ffmpeg-all.html#speechnorm) for more information.
 
 ### After updating, this program does not work as expected anymore!
 
@@ -327,11 +450,65 @@ You are probably using a 0.x version of this program. There are significant chan
 
 If you found this program useful and feel like giving back, feel free to send a donation [via PayPal](https://paypal.me/WernerRobitza).
 
-# License
+## Related Tools and Articles
+
+- [Create an AppleScript application to drop or open a folder of files in ffmpeg-normalize](https://prehensileblog.wordpress.com/2022/04/15/create-an-applescript-application-to-drop-or-open-a-folder-of-files-in-ffmpeg-normalize/)
+
+*(Have a link? Please propose an edit to this section via a pull request!)*
+
+## Contributors
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://overtag.dk/"><img src="https://avatars.githubusercontent.com/u/374612?v=4?s=100" width="100px;" alt="Benjamin Balder Bach"/><br /><sub><b>Benjamin Balder Bach</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=benjaoming" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://chaos.social/@eleni"><img src="https://avatars.githubusercontent.com/u/511547?v=4?s=100" width="100px;" alt="Eleni Lixourioti"/><br /><sub><b>Eleni Lixourioti</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=Geekfish" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/thenewguy"><img src="https://avatars.githubusercontent.com/u/77731?v=4?s=100" width="100px;" alt="thenewguy"/><br /><sub><b>thenewguy</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=thenewguy" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/aviolo"><img src="https://avatars.githubusercontent.com/u/560229?v=4?s=100" width="100px;" alt="Anthony Violo"/><br /><sub><b>Anthony Violo</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=aviolo" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://jacobs.af/"><img src="https://avatars.githubusercontent.com/u/952830?v=4?s=100" width="100px;" alt="Eric Jacobs"/><br /><sub><b>Eric Jacobs</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=jetpks" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/kostalski"><img src="https://avatars.githubusercontent.com/u/34033008?v=4?s=100" width="100px;" alt="kostalski"/><br /><sub><b>kostalski</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=kostalski" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://justinppearson.com/"><img src="https://avatars.githubusercontent.com/u/8844823?v=4?s=100" width="100px;" alt="Justin Pearson"/><br /><sub><b>Justin Pearson</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=justinpearson" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Nottt"><img src="https://avatars.githubusercontent.com/u/13532436?v=4?s=100" width="100px;" alt="ad90xa0-aa"/><br /><sub><b>ad90xa0-aa</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=Nottt" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Mathijsz"><img src="https://avatars.githubusercontent.com/u/1891187?v=4?s=100" width="100px;" alt="Mathijs"/><br /><sub><b>Mathijs</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=Mathijsz" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/mpuels"><img src="https://avatars.githubusercontent.com/u/2924816?v=4?s=100" width="100px;" alt="Marc Püls"/><br /><sub><b>Marc Püls</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=mpuels" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://www.mvbattista.com/"><img src="https://avatars.githubusercontent.com/u/158287?v=4?s=100" width="100px;" alt="Michael V. Battista"/><br /><sub><b>Michael V. Battista</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=mvbattista" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://auto-editor.com"><img src="https://avatars.githubusercontent.com/u/57511737?v=4?s=100" width="100px;" alt="WyattBlue"/><br /><sub><b>WyattBlue</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=WyattBlue" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/g3n35i5"><img src="https://avatars.githubusercontent.com/u/17593457?v=4?s=100" width="100px;" alt="Jan-Frederik Schmidt"/><br /><sub><b>Jan-Frederik Schmidt</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=g3n35i5" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/mjhalwa"><img src="https://avatars.githubusercontent.com/u/8994014?v=4?s=100" width="100px;" alt="mjhalwa"/><br /><sub><b>mjhalwa</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=mjhalwa" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/07416"><img src="https://avatars.githubusercontent.com/u/14923168?v=4?s=100" width="100px;" alt="07416"/><br /><sub><b>07416</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=07416" title="Documentation">📖</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/sian1468"><img src="https://avatars.githubusercontent.com/u/58017832?v=4?s=100" width="100px;" alt="sian1468"/><br /><sub><b>sian1468</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=sian1468" title="Tests">⚠️</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/psavva"><img src="https://avatars.githubusercontent.com/u/1454758?v=4?s=100" width="100px;" alt="Panayiotis Savva"/><br /><sub><b>Panayiotis Savva</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=psavva" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/HighMans"><img src="https://avatars.githubusercontent.com/u/42877729?v=4?s=100" width="100px;" alt="HighMans"/><br /><sub><b>HighMans</b></sub></a><br /><a href="https://github.com/slhck/ffmpeg-normalize/commits?author=HighMans" title="Code">💻</a></td>
+    </tr>
+  </tbody>
+  <tfoot>
+    <tr>
+      <td align="center" size="13px" colspan="7">
+        <img src="https://raw.githubusercontent.com/all-contributors/all-contributors-cli/1b8533af435da9854653492b1327a23a4dbd0a10/assets/logo-small.svg">
+          <a href="https://all-contributors.js.org/docs/en/bot/usage">Add your contributions</a>
+        </img>
+      </td>
+    </tr>
+  </tfoot>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+## License
 
 The MIT License (MIT)
 
-Copyright (c) 2015-2018 Werner Robitza
+Copyright (c) 2015-2022 Werner Robitza
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the

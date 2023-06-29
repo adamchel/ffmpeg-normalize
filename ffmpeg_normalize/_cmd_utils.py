@@ -1,176 +1,193 @@
-from __future__ import division
+from __future__ import annotations
+
+import logging
 import os
-import sys
-import subprocess
-from platform import system as _current_os
 import re
+import subprocess
+from platform import system
+from shutil import which
+from typing import Iterator
+
 from ffmpeg_progress_yield import FfmpegProgress
 
 from ._errors import FFmpegNormalizeError
-from ._logger import setup_custom_logger
 
-logger = setup_custom_logger("ffmpeg_normalize")
+_logger = logging.getLogger(__name__)
 
-CUR_OS = _current_os()
-IS_WIN = CUR_OS in ["Windows", "cli"]
-IS_NIX = (not IS_WIN) and any(
-    CUR_OS.startswith(i)
-    for i in ["CYGWIN", "MSYS", "Linux", "Darwin", "SunOS", "FreeBSD", "NetBSD"]
-)
-NUL = "NUL" if IS_WIN else "/dev/null"
+NUL = "NUL" if system() in ("Windows", "cli") else "/dev/null"
 DUR_REGEX = re.compile(
     r"Duration: (?P<hour>\d{2}):(?P<min>\d{2}):(?P<sec>\d{2})\.(?P<ms>\d{2})"
 )
 
 
-# https://gist.github.com/Hellowlol/5f8545e999259b4371c91ac223409209
-def to_ms(s=None, des=None, **kwargs):
-    if s:
-        hour = int(s[0:2])
-        minute = int(s[3:5])
-        sec = int(s[6:8])
-        ms = int(s[10:11])
-    else:
-        hour = int(kwargs.get("hour", 0))
-        minute = int(kwargs.get("min", 0))
-        sec = int(kwargs.get("sec", 0))
-        ms = int(kwargs.get("ms"))
-
-    result = (hour * 60 * 60 * 1000) + (minute * 60 * 1000) + (sec * 1000) + ms
-    if des and isinstance(des, int):
-        return round(result, des)
-    return result
-
-
 class CommandRunner:
-    def __init__(self, cmd, dry=False):
-        self.cmd = cmd
-        self.dry = dry
-        self.output = None
+    """
+    Wrapper for running ffmpeg commands
+    """
 
-    def run_ffmpeg_command(self):
+    def __init__(self, dry: bool = False):
+        """Create a CommandRunner object
+
+        Args:
+            cmd: Command to run as a list of strings
+            dry: Dry run mode. Defaults to False.
+        """
+        self.dry = dry
+        self.output: str | None = None
+
+    @staticmethod
+    def prune_ffmpeg_progress_from_output(output: str) -> str:
+        """
+        Prune ffmpeg progress lines from output
+
+        Args:
+            output (str): Output from ffmpeg
+
+        Returns:
+            str: Output with progress lines removed
+        """
+        return "\n".join(
+            [
+                line
+                for line in output.splitlines()
+                if not any(
+                    key in line
+                    for key in [
+                        "bitrate=",
+                        "total_size=",
+                        "out_time_us=",
+                        "out_time_ms=",
+                        "out_time=",
+                        "dup_frames=",
+                        "drop_frames=",
+                        "speed=",
+                        "progress=",
+                    ]
+                )
+            ]
+        )
+
+    def run_ffmpeg_command(self, cmd: list[str]) -> Iterator[float]:
+        """
+        Run an ffmpeg command
+
+        Yields:
+            float: Progress percentage
+        """
         # wrapper for 'ffmpeg-progress-yield'
-        ff = FfmpegProgress(self.cmd, dry_run=self.dry)
-        for progress in ff.run_command_with_progress():
-            yield progress
+        _logger.debug(f"Running command: {cmd}")
+        ff = FfmpegProgress(cmd, dry_run=self.dry)
+        yield from ff.run_command_with_progress()
 
         self.output = ff.stderr
 
-    def run_command(self):
-        logger.debug(f"Running command: {self.cmd}")
+        if _logger.getEffectiveLevel() == logging.DEBUG and self.output is not None:
+            _logger.debug(
+                f"ffmpeg output: {CommandRunner.prune_ffmpeg_progress_from_output(self.output)}"
+            )
+
+    def run_command(self, cmd: list[str]) -> CommandRunner:
+        """
+        Run a command with subprocess
+
+        Returns:
+            CommandRunner: itself
+
+        Raises:
+            RuntimeError: If command returns non-zero exit code
+        """
+        _logger.debug(f"Running command: {cmd}")
 
         if self.dry:
-            logger.debug("Dry mode specified, not actually running command")
-            return
+            _logger.debug("Dry mode specified, not actually running command")
+            return self
 
         p = subprocess.Popen(
-            self.cmd,
+            cmd,
             stdin=subprocess.PIPE,  # Apply stdin isolation by creating separate pipe.
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=False,
         )
 
-        # simple running of command
-        stdout, stderr = p.communicate()
+        stdout_bytes, stderr_bytes = p.communicate()
 
-        stdout = stdout.decode("utf8", errors="replace")
-        stderr = stderr.decode("utf8", errors="replace")
+        stdout = stdout_bytes.decode("utf8", errors="replace")
+        stderr = stderr_bytes.decode("utf8", errors="replace")
 
-        if p.returncode == 0:
-            self.output = stdout + stderr
-        else:
-            raise RuntimeError(
-                f"Error running command {self.cmd}: {str(stderr)}"
-            )
+        if p.returncode != 0:
+            raise RuntimeError(f"Error running command {cmd}: {stderr}")
 
-    def get_output(self):
+        self.output = stdout + stderr
+        return self
+
+    def get_output(self) -> str:
+        if self.output is None:
+            raise FFmpegNormalizeError("Command has not been run yet")
         return self.output
 
 
-def which(program):
+def dict_to_filter_opts(opts: dict[str, object]) -> str:
     """
-    Find a program in PATH and return path
-    From: http://stackoverflow.com/q/377017/
+    Convert a dictionary to a ffmpeg filter option string
+
+    Args:
+        opts (dict[str, object]): Dictionary of options
+
+    Returns:
+        str: Filter option string
     """
-
-    def is_exe(fpath):
-        found = os.path.isfile(fpath) and os.access(fpath, os.X_OK)
-        if not found and sys.platform == "win32":
-            fpath = fpath + ".exe"
-            found = os.path.isfile(fpath) and os.access(fpath, os.X_OK)
-        return found
-
-    fpath, _ = os.path.split(program)
-    if fpath:
-        if is_exe(program):
-            logger.debug("found executable: " + str(program))
-            return program
-    else:
-        for path in os.environ["PATH"].split(os.pathsep):
-            path = os.path.expandvars(os.path.expanduser(path)).strip('"')
-            exe_file = os.path.join(path, program)
-            if is_exe(exe_file):
-                logger.debug("found executable in path: " + str(exe_file))
-                return exe_file
-
-    return None
-
-
-def dict_to_filter_opts(opts):
     filter_opts = []
     for k, v in opts.items():
         filter_opts.append(f"{k}={v}")
     return ":".join(filter_opts)
 
 
-def get_ffmpeg_exe():
+def get_ffmpeg_exe() -> str:
     """
     Return path to ffmpeg executable
+
+    Returns:
+        str: Path to ffmpeg executable
+
+    Raises:
+        FFmpegNormalizeError: If ffmpeg is not found
     """
-    ffmpeg_path = os.getenv("FFMPEG_PATH")
-    if ffmpeg_path:
-        if os.sep in ffmpeg_path:
-            ffmpeg_exe = ffmpeg_path
-            if not os.path.isfile(ffmpeg_exe):
-                raise FFmpegNormalizeError(f"No file exists at {ffmpeg_exe}")
-        else:
-            ffmpeg_exe = which(ffmpeg_path)
-            if not ffmpeg_exe:
-                raise FFmpegNormalizeError(
-                    f"Could not find '{ffmpeg_path}' in your $PATH."
-                )
-    else:
-        ffmpeg_exe = which("ffmpeg")
+    if ff_path := os.getenv("FFMPEG_PATH"):
+        if os.sep in ff_path:
+            if not os.path.isfile(ff_path):
+                raise FFmpegNormalizeError(f"No file exists at {ff_path}")
 
-    if not ffmpeg_exe:
-        if which("avconv"):
-            raise FFmpegNormalizeError(
-                "avconv is not supported. "
-                "Please install ffmpeg from http://ffmpeg.org instead."
-            )
-        else:
-            raise FFmpegNormalizeError(
-                "Could not find ffmpeg in your $PATH or $FFMPEG_PATH. "
-                "Please install ffmpeg from http://ffmpeg.org"
-            )
+            return ff_path
 
-    return ffmpeg_exe
+        ff_exe = which(ff_path)
+        if not ff_exe:
+            raise FFmpegNormalizeError(f"Could not find '{ff_path}' in your $PATH.")
 
+        return ff_exe
 
-def ffmpeg_has_loudnorm():
-    """
-    Run feature detection on ffmpeg, returns True if ffmpeg supports
-    the loudnorm filter
-    """
-    cmd_runner = CommandRunner([get_ffmpeg_exe(), "-filters"])
-    cmd_runner.run_command()
-    output = cmd_runner.get_output()
-    if "loudnorm" in output:
-        return True
-    else:
-        logger.error(
-            "Your ffmpeg version does not support the 'loudnorm' filter. "
-            "Please make sure you are running ffmpeg v3.1 or above."
+    ff_path = which("ffmpeg")
+    if not ff_path:
+        raise FFmpegNormalizeError(
+            "Could not find ffmpeg in your $PATH or $FFMPEG_PATH. "
+            "Please install ffmpeg from http://ffmpeg.org"
         )
-        return False
+
+    return ff_path
+
+
+def ffmpeg_has_loudnorm() -> bool:
+    """
+    Run feature detection on ffmpeg to see if it supports the loudnorm filter.
+
+    Returns:
+        bool: True if loudnorm is supported, False otherwise
+    """
+    output = CommandRunner().run_command([get_ffmpeg_exe(), "-filters"]).get_output()
+    supports_loudnorm = "loudnorm" in output
+    if not supports_loudnorm:
+        _logger.error(
+            "Your ffmpeg does not support the 'loudnorm' filter. "
+            "Please make sure you are running ffmpeg v4.2 or above."
+        )
+    return supports_loudnorm

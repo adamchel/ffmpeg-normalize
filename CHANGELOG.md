@@ -1,6 +1,356 @@
 # Changelog
 
 
+## v1.27.4 (2023-06-29)
+
+* Docs: add HighMans as a contributor for code (#242)
+
+  * docs: update README.md
+
+  * docs: update .all-contributorsrc
+
+  ---------
+
+* Properly handle non-existing input files and skipping.
+
+* Fix: Dockerfile used wrong path.
+
+* Use `https` rather than `http` (#238)
+
+* Docs: add psavva as a contributor for code (#236)
+
+  * docs: update README.md
+
+  * docs: update .all-contributorsrc
+
+  ---------
+
+* Add Docker support (#235)
+
+* Docs: add @sian1468 as a contributor.
+
+* Round percentage in test (#234)
+
+
+## v1.27.3 (2023-05-06)
+
+* Bump ffmpeg-progress-yield, round percentage output.
+
+* Fix test for progress.
+
+  seems flaky, worked locally?
+
+
+## v1.27.2 (2023-05-05)
+
+* Bump ffmpeg-progress-yield, output progress in percent.
+
+* Docs: add @07416 as a contributor.
+
+* A typo in README (#231)
+
+
+## v1.27.1 (2023-04-25)
+
+* Fix capping to [1, 50] instead of [1, 7] (#230)
+
+* Clarify usage, output/input order.
+
+* Add note on ffmpeg 6.0.
+
+* Docs: add @mjhalwa as a contributor.
+
+
+## v1.27.0 (2023-04-24)
+
+* Constrain input LRA for second pass, addresses #227.
+
+* Feat: add linear loudnorm option to set lra up to target, then keep input lra.
+
+* Update question template.
+
+
+## v1.26.6 (2023-03-16)
+
+* Production status stable.
+
+* Make install_requires more abstract.
+
+
+## v1.26.5 (2023-03-15)
+
+* Add "-hide_banner" remove "-nostdin" (#222)
+
+  The `-nostdin` option is unnessary because of the `-y` option.
+  Adding `-hide_banner` makes DEBUG statements shorter.
+
+* Homebrew works on linux too.
+
+* Explain ffmpeg installation steps.
+
+
+## v1.26.4 (2023-02-08)
+
+* Re-add requirements.txt to (maybe) fix conda-forge builds.
+
+
+## v1.26.3 (2023-02-08)
+
+* Fix requirements (#218)
+
+* Improve types.
+
+* Docs: add @g3n35i5 as a contributor.
+
+
+## v1.26.2 (2023-02-06)
+
+* Add ignore-revs file.
+
+* Formatting and import sorting.
+
+* Refactor: Improved logging behavior (#216)
+
+* Add "apt update" (#215)
+
+* Remove stalebot.
+
+* Update README.
+
+* Move to_ms and make CommandRunner more ergonomic (#212)
+
+* Upgrade workflow, get ffmpeg from apt (#213)
+
+* Turn FFmpegNormalizeError into a normal Exception (#211)
+
+* Remove manifest.in (#210)
+
+* Simplify logging (#209)
+
+* Use pep585 type hints (#207)
+
+* Don't use tempfile's private module function (#206)
+
+* Fix smaller type errors.
+
+* Reduce mypy errors 12 -> 4 (#204)
+
+* Make input validation more efficient.
+
+  Make input validation more efficient
+
+  Re-separate formats and exts
+
+
+## v1.26.1 (2022-12-18)
+
+* Bump requirements.
+
+* Add py.typed support.
+
+* General refactoring + type hints (#202)
+
+* Re-write to f-strings when possible (#201)
+
+* Remove unnecessary utf-8 declarations (#200)
+
+  "-*- coding: utf-8 -*-" is a Python 2 construct and can be safely
+  removed. Other utf-8 declarations are also unnecessary.
+
+
+## v1.26.0 (2022-12-14)
+
+* Add .editorconfig.
+
+* Link to API docs.
+
+* Add docs.
+
+* Add type hints, document everything, refactor some code.
+
+* Add more audio formats (#199)
+
+* Add python 3.11 to CI.
+
+* Docs: add WyattBlue as a contributor for code (#198)
+
+  * docs: update README.md
+
+  * docs: update .all-contributorsrc
+
+* Upgrade to Python 3.8 syntax (#197)
+
+* Fix python version in github tests.
+
+* Bump requirements to latest versions.
+
+* Add python 3.11 to list of languages.
+
+* Bump required python version to 3.8.
+
+* Various minor code cleanups and type hints.
+
+* Harmonize logger code.
+
+* Update python version in tests.
+
+* Docs: add @mvbattista as a contributor.
+
+* Docs: add @mpuels as a contributor.
+
+* Docs: add @Mathijsz as a contributor.
+
+* Docs: add @Nottt as a contributor.
+
+* Docs: add @justinpearson as a contributor.
+
+* Docs: add @kostalski as a contributor.
+
+* Docs: add @jetpks as a contributor.
+
+* Docs: add @aviolo as a contributor.
+
+* Docs: add @thenewguy as a contributor.
+
+* Docs: add @Geekfish as a contributor.
+
+* Docs: add @benjaoming as a contributor.
+
+* Reference speechnorm.
+
+
+## v1.25.3 (2022-11-09)
+
+* Update README.
+
+* Update list of pcm-incompatible extensions.
+
+
+## v1.25.2 (2022-09-14)
+
+* Constrain parsed ranges to avoid out of bounds, fixes #189.
+
+* Fix readme for extra-input-options.
+
+* Warn about dynamic mode only if not already set, fixes #187.
+
+
+## v1.25.1 (2022-08-21)
+
+* Add warning in case user specifies both --lrt and --keep-loudness-range-target.
+
+
+## v1.25.0 (2022-08-20)
+
+* Add option to keep loudness range target, fixes #181.
+
+* Only show warning about disabling video if not yet disabled, addresses #184.
+
+
+## v1.24.1 (2022-08-20)
+
+* Code formatting.
+
+* Extend warning for audio-only format to opus, fixes #184.
+
+
+## v1.24.0 (2022-08-02)
+
+* Update python requirements.
+
+* Prevent race condition in output dir creation.
+
+
+## v1.23.1 (2022-07-12)
+
+* Increase possible loudness range target to 50.
+
+
+## v1.23.0 (2022-05-01)
+
+* Add way to force dynamic mode, clarify usage, fixes #176.
+
+
+## v1.22.10 (2022-04-25)
+
+* Add warning for cover art, addresses #174 and #175.
+
+* Update README.
+
+
+## v1.22.9 (2022-04-17)
+
+* Improve issue templates.
+
+* Do not print ffmpeg progress in debug logs.
+
+* Remove unused import.
+
+* Replace which() function with shlex version.
+
+* Add python 3.10 in setup.py.
+
+* Clarify minimum ffmpeg version.
+
+
+## v1.22.8 (2022-03-07)
+
+* Properly detect -inf dB input.
+
+
+## v1.22.7 (2022-02-25)
+
+* Debug command output for ffmpeg commands.
+
+* Remove unneeded warning message.
+
+
+## v1.22.6 (2022-02-20)
+
+* Use astats instead of volumedetect filter, fixes #163.
+
+  Allows floating point calculation.
+
+
+## v1.22.5 (2022-01-25)
+
+* Print warning for bit depths > 16, addresses #163.
+
+
+## v1.22.4 (2021-10-18)
+
+* Re-raise error on ffmpeg command failure.
+
+  This prevents incorrectly telling the user that a normalized file was written when it wasn't.
+
+
+## v1.22.3 (2021-08-31)
+
+* Set tqdm lock for logging only when multiprocessing is available.
+
+  Multiprocessing is not available in all environments, for example
+  on AWS lambda python run time lacks /dev/shm, so trying to acquire
+  a multiprocessing Lock throws an OSError. The module could also be
+  missing in some cases (ex. Jython, although this library doesn't support
+  Jython anyway).
+
+  The solution to this is to only try to set the lock when multiprocessing
+  is available. The tqdm library solves this in the same manner.
+
+  For more details: https://github.com/slhck/ffmpeg-normalize/issues/156
+
+* Add instructions on how to run tests.
+
+
+## v1.22.2 (2021-08-14)
+
+* Bump requirements, should fix #155.
+
+* Move all examples to Wiki.
+
+* Update badge link.
+
+
 ## v1.22.1 (2021-03-10)
 
 * Add python_requires to setup.py.

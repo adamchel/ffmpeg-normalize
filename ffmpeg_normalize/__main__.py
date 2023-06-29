@@ -1,24 +1,24 @@
+from __future__ import annotations
+
 import argparse
-import textwrap
+import json
 import logging
 import os
 import shlex
-import json
+import sys
+import textwrap
+from json.decoder import JSONDecodeError
+from typing import NoReturn
 
-try:
-    from json.decoder import JSONDecodeError
-except ImportError:
-    JSONDecodeError = ValueError
-
-from ._version import __version__
-from ._ffmpeg_normalize import FFmpegNormalize, NORMALIZATION_TYPES
 from ._errors import FFmpegNormalizeError
-from ._logger import setup_custom_logger
+from ._ffmpeg_normalize import NORMALIZATION_TYPES, FFmpegNormalize
+from ._logger import setup_cli_logger
+from ._version import __version__
 
-logger = setup_custom_logger("ffmpeg_normalize")
+_logger = logging.getLogger(__name__)
 
 
-def create_parser():
+def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ffmpeg-normalize",
         description=textwrap.dedent(
@@ -28,24 +28,7 @@ def create_parser():
                 __version__
             )
         ),
-        usage=textwrap.dedent(
-            """\
-            ffmpeg-normalize input [input ...]
-                [-h]
-                [-o OUTPUT [OUTPUT ...]] [-of OUTPUT_FOLDER]
-                [-f] [-d] [-v] [-q] [-n] [-pr]
-                [--version]
-                [-nt {ebu,rms,peak}] [-t TARGET_LEVEL] [-p]
-                [-lrt LOUDNESS_RANGE_TARGET] [-tp TRUE_PEAK] [--offset OFFSET] [--dual-mono]
-                [-c:a AUDIO_CODEC] [-b:a AUDIO_BITRATE] [-ar SAMPLE_RATE] [-koa]
-                [-prf PRE_FILTER] [-pof POST_FILTER]
-                [-vn] [-c:v VIDEO_CODEC]
-                [-sn] [-mn] [-cn]
-                [-ei EXTRA_INPUT_OPTIONS] [-e EXTRA_OUTPUT_OPTIONS]
-                [-ofmt OUTPUT_FORMAT]
-                [-ext EXTENSION]
-        """
-        ),
+        # usage="%(prog)s INPUT [INPUT ...] [-o OUTPUT [OUTPUT ...]] [options]",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog=textwrap.dedent(
             """\
@@ -196,10 +179,33 @@ def create_parser():
         help=textwrap.dedent(
             """\
         EBU Loudness Range Target in LUFS (default: 7.0).
-        Range is 1.0 - 20.0.
+        Range is 1.0 - 50.0.
         """
         ),
         default=7.0,
+    )
+
+    group_ebu.add_argument(
+        "--keep-loudness-range-target",
+        action="store_true",
+        help=textwrap.dedent(
+            """\
+        Keep the input loudness range target to allow for linear normalization.
+        """
+        ),
+    )
+
+    group_ebu.add_argument(
+        "--keep-lra-above-loudness-range-target",
+        action="store_true",
+        help=textwrap.dedent(
+            """\
+        Keep input loudness range above loudness range target.
+        - `LOUDNESS_RANGE_TARGET` for input loudness range `<= LOUDNESS_RANGE_TARGET` or
+        - keep input loudness range target above `LOUDNESS_RANGE_TARGET`.
+        as alternative to `--keep-loudness-range-target` to allow for linear normalization.
+        """
+        ),
     )
 
     group_ebu.add_argument(
@@ -240,6 +246,22 @@ def create_parser():
         measurement will be perceptually incorrect. If set, this option will
         compensate for this effect. Multi-channel input files are not affected
         by this option.
+        """
+        ),
+    )
+
+    group_ebu.add_argument(
+        "--dynamic",
+        action="store_true",
+        help=textwrap.dedent(
+            """\
+        Force dynamic normalization mode.
+
+        Instead of applying linear EBU R128 normalization, choose a dynamic
+        normalization. This is not usually recommended.
+
+        Dynamic mode will automatically change the sample rate to 192 kHz. Use
+        -ar/--sample-rate to specify a different output sample rate.
         """
         ),
     )
@@ -432,35 +454,41 @@ def create_parser():
     return parser
 
 
-def _split_options(opts):
-    """
-    Parse extra options (input or output) into a list
-    """
-    if not opts:
-        return []
-    try:
-        if opts.startswith("["):
-            try:
-                ret = [str(s) for s in json.loads(opts)]
-            except JSONDecodeError:
-                ret = shlex.split(opts)
-        else:
-            ret = shlex.split(opts)
-    except Exception as e:
-        raise FFmpegNormalizeError(f"Could not parse extra_options: {e}")
-    return ret
-
-
 def main(args=None):
     # Allow arguments to be passed directly, otherwise args will be read from sys.argv
     cli_args = create_parser().parse_args(args)
+    setup_cli_logger(arguments=cli_args)
 
-    if cli_args.quiet:
-        logger.setLevel(logging.ERROR)
-    elif cli_args.debug:
-        logger.setLevel(logging.DEBUG)
-    elif cli_args.verbose:
-        logger.setLevel(logging.INFO)
+    def error(message: object) -> NoReturn:
+        if _logger.getEffectiveLevel() == logging.DEBUG:
+            _logger.error(f"FFmpegNormalizeError: {message}")
+        else:
+            _logger.error(message)
+        sys.exit(1)
+
+    def _split_options(opts: str) -> list[str]:
+        """
+        Parse extra options (input or output) into a list.
+
+        Args:
+            opts: String of options
+
+        Returns:
+            list: List of options
+        """
+        if not opts:
+            return []
+        try:
+            if opts.startswith("["):
+                try:
+                    ret = [str(s) for s in json.loads(opts)]
+                except JSONDecodeError:
+                    ret = shlex.split(opts)
+            else:
+                ret = shlex.split(opts)
+        except Exception as e:
+            error(f"Could not parse extra_options: {e}")
+        return ret
 
     # parse extra options
     extra_input_options = _split_options(cli_args.extra_input_options)
@@ -472,9 +500,12 @@ def main(args=None):
         print_stats=cli_args.print_stats,
         loudness_range_target=cli_args.loudness_range_target,
         # threshold=cli_args.threshold,
+        keep_loudness_range_target=cli_args.keep_loudness_range_target,
+        keep_lra_above_loudness_range_target=cli_args.keep_lra_above_loudness_range_target,
         true_peak=cli_args.true_peak,
         offset=cli_args.offset,
         dual_mono=cli_args.dual_mono,
+        dynamic=cli_args.dynamic,
         audio_codec=cli_args.audio_codec,
         audio_bitrate=cli_args.audio_bitrate,
         sample_rate=cli_args.sample_rate,
@@ -493,12 +524,8 @@ def main(args=None):
         progress=cli_args.progress,
     )
 
-    if (
-        cli_args.output is not None
-        and len(cli_args.output) > 0
-        and len(cli_args.input) > len(cli_args.output)
-    ):
-        logger.warning(
+    if cli_args.output and len(cli_args.input) > len(cli_args.output):
+        _logger.warning(
             "There are more input files than output file names given. "
             "Please specify one output file name per input file using -o <output1> <output2> ... "
             "Will apply default file naming for the remaining ones."
@@ -507,17 +534,14 @@ def main(args=None):
     for index, input_file in enumerate(cli_args.input):
         if cli_args.output is not None and index < len(cli_args.output):
             if cli_args.output_folder and cli_args.output_folder != "normalized":
-                logger.warning(
-                    "Output folder {} is ignored for input file {}".format(
-                        cli_args.output_folder, input_file
-                    )
+                _logger.warning(
+                    f"Output folder {cli_args.output_folder} is ignored for "
+                    f"input file {input_file}"
                 )
             output_file = cli_args.output[index]
             output_dir = os.path.dirname(output_file)
             if output_dir != "" and not os.path.isdir(output_dir):
-                raise FFmpegNormalizeError(
-                    f"Output file path {output_dir} does not exist"
-                )
+                error(f"Output file path {output_dir} does not exist")
         else:
             output_file = os.path.join(
                 cli_args.output_folder,
@@ -526,23 +550,34 @@ def main(args=None):
                 + cli_args.extension,
             )
             if not os.path.isdir(cli_args.output_folder) and not cli_args.dry_run:
-                logger.warning(
-                    "Output directory '{}' does not exist, will create".format(
-                        cli_args.output_folder
-                    )
+                _logger.warning(
+                    f"Output directory '{cli_args.output_folder}' does not exist, will create"
                 )
-                os.makedirs(cli_args.output_folder)
+                os.makedirs(cli_args.output_folder, exist_ok=True)
 
         if os.path.exists(output_file) and not cli_args.force:
-            logger.error(
-                "Output file {} already exists, skipping. Use -f to force overwriting.".format(
-                    output_file
-                )
+            _logger.warning(
+                f"Output file '{output_file}' already exists, skipping. Use -f to force overwriting."
             )
-        else:
-            ffmpeg_normalize.add_media_file(input_file, output_file)
+            continue
 
-    ffmpeg_normalize.run_normalization()
+        if not os.path.exists(input_file):
+            _logger.warning(f"Input file '{input_file}' does not exist, skipping")
+            continue
+
+        if not os.path.isfile(input_file):
+            _logger.warning(f"Input file '{input_file}' is not a file, skipping")
+            continue
+
+        try:
+            ffmpeg_normalize.add_media_file(input_file, output_file)
+        except FFmpegNormalizeError as e:
+            error(e)
+
+    try:
+        ffmpeg_normalize.run_normalization()
+    except FFmpegNormalizeError as e:
+        error(e)
 
 
 if __name__ == "__main__":

@@ -1,16 +1,41 @@
+from __future__ import annotations
+
+import logging
 import os
 import re
-import tempfile
-import shutil
-from tqdm import tqdm
 import shlex
+from shutil import move, rmtree
+from tempfile import mkdtemp
+from typing import TYPE_CHECKING, Iterator, Literal, TypedDict
 
-from ._streams import AudioStream, VideoStream, SubtitleStream
+from tqdm import tqdm
+
+from ._cmd_utils import DUR_REGEX, NUL, CommandRunner
 from ._errors import FFmpegNormalizeError
-from ._cmd_utils import NUL, CommandRunner, DUR_REGEX, to_ms
-from ._logger import setup_custom_logger
+from ._streams import AudioStream, SubtitleStream, VideoStream
 
-logger = setup_custom_logger("ffmpeg_normalize")
+if TYPE_CHECKING:
+    from ffmpeg_normalize import FFmpegNormalize
+
+_logger = logging.getLogger(__name__)
+
+AUDIO_ONLY_FORMATS = {"aac", "ast", "flac", "mp3", "mka", "oga", "ogg", "opus", "wav"}
+ONE_STREAM = {"aac", "ast", "flac", "mp3", "wav"}
+
+
+def _to_ms(**kwargs: str) -> int:
+    hour = int(kwargs.get("hour", 0))
+    minute = int(kwargs.get("min", 0))
+    sec = int(kwargs.get("sec", 0))
+    ms = int(kwargs.get("ms", 0))
+
+    return (hour * 60 * 60 * 1000) + (minute * 60 * 1000) + (sec * 1000) + ms
+
+
+class StreamDict(TypedDict):
+    audio: dict[int, AudioStream]
+    video: dict[int, VideoStream]
+    subtitle: dict[int, SubtitleStream]
 
 
 class MediaFile:
@@ -18,40 +43,50 @@ class MediaFile:
     Class that holds a file, its streams and adjustments
     """
 
-    def __init__(self, ffmpeg_normalize, input_file, output_file=None):
+    def __init__(
+        self, ffmpeg_normalize: FFmpegNormalize, input_file: str, output_file: str
+    ):
         """
-        Initialize a media file for later normalization.
+        Initialize a media file for later normalization by parsing the streams.
 
-        Arguments:
-            ffmpeg_normalize {FFmpegNormalize} -- reference to overall settings
-            input_file {str} -- Path to input file
-
-        Keyword Arguments:
-            output_file {str} -- Path to output file (default: {None})
+        Args:
+            ffmpeg_normalize (FFmpegNormalize): reference to overall settings
+            input_file (str): Path to input file
+            output_file (str): Path to output file
         """
         self.ffmpeg_normalize = ffmpeg_normalize
         self.skip = False
         self.input_file = input_file
         self.output_file = output_file
-        self.streams = {"audio": {}, "video": {}, "subtitle": {}}
+        self.output_ext = os.path.splitext(output_file)[1][1:]
+        self.streams: StreamDict = {"audio": {}, "video": {}, "subtitle": {}}
 
         self.parse_streams()
 
-    def _stream_ids(self):
+    def _stream_ids(self) -> list[int]:
+        """
+        Get all stream IDs of this file.
+
+        Returns:
+            list: List of stream IDs
+        """
         return (
             list(self.streams["audio"].keys())
             + list(self.streams["video"].keys())
             + list(self.streams["subtitle"].keys())
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return os.path.basename(self.input_file)
 
-    def parse_streams(self):
+    def parse_streams(self) -> None:
         """
-        Try to parse all input streams from file
+        Try to parse all input streams from file and set them in self.streams.
+
+        Raises:
+            FFmpegNormalizeError: If no audio streams are found
         """
-        logger.debug(f"Parsing streams of {self.input_file}")
+        _logger.debug(f"Parsing streams of {self.input_file}")
 
         cmd = [
             self.ffmpeg_normalize.ffmpeg_exe,
@@ -68,32 +103,26 @@ class MediaFile:
             NUL,
         ]
 
-        cmd_runner = CommandRunner(cmd)
-        cmd_runner.run_command()
-        output = cmd_runner.get_output()
+        output = CommandRunner().run_command(cmd).get_output()
 
-        logger.debug("Stream parsing command output:")
-        logger.debug(output)
+        _logger.debug("Stream parsing command output:")
+        _logger.debug(output)
 
         output_lines = [line.strip() for line in output.split("\n")]
 
         duration = None
         for line in output_lines:
-
             if "Duration" in line:
-                duration_search = DUR_REGEX.search(line)
-                if not duration_search:
-                    logger.warning("Could not extract duration from input file!")
+                if duration_search := DUR_REGEX.search(line):
+                    duration = _to_ms(**duration_search.groupdict()) / 1000
+                    _logger.debug(f"Found duration: {duration} s")
                 else:
-                    duration = duration_search.groupdict()
-                    duration = to_ms(**duration) / 1000
-                    logger.debug("Found duration: " + str(duration) + " s")
+                    _logger.warning("Could not extract duration from input file!")
 
             if not line.startswith("Stream"):
                 continue
 
-            stream_id_match = re.search(r"#0:([\d]+)", line)
-            if stream_id_match:
+            if stream_id_match := re.search(r"#0:([\d]+)", line):
                 stream_id = int(stream_id_match.group(1))
                 if stream_id in self._stream_ids():
                     continue
@@ -101,16 +130,16 @@ class MediaFile:
                 continue
 
             if "Audio" in line:
-                logger.debug(f"Found audio stream at index {stream_id}")
+                _logger.debug(f"Found audio stream at index {stream_id}")
                 sample_rate_match = re.search(r"(\d+) Hz", line)
                 sample_rate = (
                     int(sample_rate_match.group(1)) if sample_rate_match else None
                 )
-                bit_depth_match = re.search(r"s(\d+)p?,", line)
+                bit_depth_match = re.search(r"[sfu](\d+)(p|le|be)?", line)
                 bit_depth = int(bit_depth_match.group(1)) if bit_depth_match else None
                 self.streams["audio"][stream_id] = AudioStream(
-                    self,
                     self.ffmpeg_normalize,
+                    self,
                     stream_id,
                     sample_rate,
                     bit_depth,
@@ -118,15 +147,15 @@ class MediaFile:
                 )
 
             elif "Video" in line:
-                logger.debug(f"Found video stream at index {stream_id}")
+                _logger.debug(f"Found video stream at index {stream_id}")
                 self.streams["video"][stream_id] = VideoStream(
-                    self, self.ffmpeg_normalize, stream_id
+                    self.ffmpeg_normalize, self, stream_id
                 )
 
             elif "Subtitle" in line:
-                logger.debug(f"Found subtitle stream at index {stream_id}")
+                _logger.debug(f"Found subtitle stream at index {stream_id}")
                 self.streams["subtitle"][stream_id] = SubtitleStream(
-                    self, self.ffmpeg_normalize, stream_id
+                    self.ffmpeg_normalize, self, stream_id
                 )
 
         if not self.streams["audio"]:
@@ -135,10 +164,10 @@ class MediaFile:
             )
 
         if (
-            os.path.splitext(self.output_file)[1].lower() in [".wav", ".mp3", ".aac"]
+            self.output_ext.lower() in ONE_STREAM
             and len(self.streams["audio"].values()) > 1
         ):
-            logger.warning(
+            _logger.warning(
                 "Output file only supports one stream. "
                 "Keeping only first audio stream."
             )
@@ -147,8 +176,11 @@ class MediaFile:
             self.streams["video"] = {}
             self.streams["subtitle"] = {}
 
-    def run_normalization(self):
-        logger.debug(f"Running normalization for {self.input_file}")
+    def run_normalization(self) -> None:
+        """
+        Run the normalization process for this file.
+        """
+        _logger.debug(f"Running normalization for {self.input_file}")
 
         # run the first pass to get loudness stats
         self._first_pass()
@@ -162,14 +194,29 @@ class MediaFile:
             for _ in self._second_pass():
                 pass
 
-    def _first_pass(self):
-        logger.debug(f"Parsing normalization info for {self.input_file}")
+    def _can_write_output_video(self) -> bool:
+        """
+        Determine whether the output file can contain video at all.
+
+        Returns:
+            bool: True if the output file can contain video, False otherwise
+        """
+        if self.output_ext.lower() in AUDIO_ONLY_FORMATS:
+            return False
+
+        return not self.ffmpeg_normalize.video_disable
+
+    def _first_pass(self) -> None:
+        """
+        Run the first pass of the normalization process.
+        """
+        _logger.debug(f"Parsing normalization info for {self.input_file}")
 
         for index, audio_stream in enumerate(self.streams["audio"].values()):
             if self.ffmpeg_normalize.normalization_type == "ebu":
                 fun = getattr(audio_stream, "parse_loudnorm_stats")
             else:
-                fun = getattr(audio_stream, "parse_volumedetect_stats")
+                fun = getattr(audio_stream, "parse_astats")
 
             if self.ffmpeg_normalize.progress:
                 with tqdm(
@@ -190,9 +237,12 @@ class MediaFile:
             ]
             self.ffmpeg_normalize.stats.extend(stats)
 
-    def _get_audio_filter_cmd(self):
+    def _get_audio_filter_cmd(self) -> tuple[str, list[str]]:
         """
-        Return filter_complex command and output labels needed
+        Return the audio filter command and output labels needed.
+
+        Returns:
+            tuple[str, list[str]]: filter_complex command and the required output labels
         """
         filter_chains = []
         output_labels = []
@@ -223,23 +273,23 @@ class MediaFile:
 
         return filter_complex_cmd, output_labels
 
-    def _second_pass(self):
+    def _second_pass(self) -> Iterator[float]:
         """
-        Construct the second pass command and run it
+        Construct the second pass command and run it.
 
         FIXME: make this method simpler
         """
-        logger.info(f"Running second pass for {self.input_file}")
+        _logger.info(f"Running second pass for {self.input_file}")
 
         # get the target output stream types depending on the options
-        output_stream_types = ["audio"]
-        if not self.ffmpeg_normalize.video_disable:
+        output_stream_types: list[Literal["audio", "video", "subtitle"]] = ["audio"]
+        if self._can_write_output_video():
             output_stream_types.append("video")
         if not self.ffmpeg_normalize.subtitle_disable:
             output_stream_types.append("subtitle")
 
         # base command, here we will add all other options
-        cmd = [self.ffmpeg_normalize.ffmpeg_exe, "-y", "-nostdin"]
+        cmd = [self.ffmpeg_normalize.ffmpeg_exe, "-hide_banner", "-y"]
 
         # extra options (if any)
         if self.ffmpeg_normalize.extra_input_options:
@@ -277,11 +327,17 @@ class MediaFile:
             cmd.extend(["-map_chapters", "0"])
 
         # collect all '-map' and codecs needed for output video based on input video
-        if not self.ffmpeg_normalize.video_disable:
-            for s in self.streams["video"].keys():
-                cmd.extend(["-map", f"0:{s}"])
-            # set codec (copy by default)
-            cmd.extend(["-c:v", self.ffmpeg_normalize.video_codec])
+        if self.streams["video"]:
+            if self._can_write_output_video():
+                for s in self.streams["video"].keys():
+                    cmd.extend(["-map", f"0:{s}"])
+                # set codec (copy by default)
+                cmd.extend(["-c:v", self.ffmpeg_normalize.video_codec])
+            else:
+                if not self.ffmpeg_normalize.video_disable:
+                    _logger.warning(
+                        f"The chosen output extension {self.output_ext} does not support video/cover art. It will be disabled."
+                    )
 
         # ... and map the output of the normalization filters
         for ol in output_labels:
@@ -299,12 +355,6 @@ class MediaFile:
             cmd.extend(["-b:a", str(self.ffmpeg_normalize.audio_bitrate)])
         if self.ffmpeg_normalize.sample_rate:
             cmd.extend(["-ar", str(self.ffmpeg_normalize.sample_rate)])
-        else:
-            if self.ffmpeg_normalize.normalization_type == "ebu":
-                logger.warn(
-                    "The sample rate will automatically be set to 192 kHz by the loudnorm filter. "
-                    "Specify -ar/--sample-rate to override it."
-                )
 
         # ... and subtitles
         if not self.ffmpeg_normalize.subtitle_disable:
@@ -315,7 +365,7 @@ class MediaFile:
 
         if self.ffmpeg_normalize.keep_original_audio:
             highest_index = len(self.streams["audio"])
-            for index, (_, s) in enumerate(self.streams["audio"].items()):
+            for index, _ in enumerate(self.streams["audio"].items()):
                 cmd.extend(["-map", f"0:a:{index}"])
                 cmd.extend([f"-c:a:{highest_index + index}", "copy"])
 
@@ -330,41 +380,29 @@ class MediaFile:
         # if dry run, only show sample command
         if self.ffmpeg_normalize.dry_run:
             cmd.append(self.output_file)
-            cmd_runner = CommandRunner(cmd, dry=True)
-            cmd_runner.run_command()
+            CommandRunner(dry=True).run_command(cmd)
             yield 100
             return
 
-        # create a temporary output file name
-        temp_dir = tempfile.gettempdir()
-        output_file_suffix = os.path.splitext(self.output_file)[1]
-        temp_file_name = os.path.join(
-            temp_dir, next(tempfile._get_candidate_names()) + output_file_suffix
-        )
-        cmd.append(temp_file_name)
+        temp_dir = mkdtemp()
+        temp_file = os.path.join(temp_dir, f"out.{self.output_ext}")
+        cmd.append(temp_file)
 
-        # run the actual command
         try:
-            cmd_runner = CommandRunner(cmd)
             try:
-                for progress in cmd_runner.run_ffmpeg_command():
-                    yield progress
+                yield from CommandRunner().run_ffmpeg_command(cmd)
             except Exception as e:
-                logger.error(
-                    "Error while running command {}! Error: {}".format(
-                        " ".join([shlex.quote(c) for c in cmd]), e
-                    )
-                )
+                cmd_str = " ".join([shlex.quote(c) for c in cmd])
+                _logger.error(f"Error while running command {cmd_str}! Error: {e}")
+                raise e
             else:
-                # move file from TMP to output file
-                logger.debug(
-                    f"Moving temporary file from {temp_file_name} to {self.output_file}"
+                _logger.debug(
+                    f"Moving temporary file from {temp_file} to {self.output_file}"
                 )
-                shutil.move(temp_file_name, self.output_file)
+                move(temp_file, self.output_file)
+                rmtree(temp_dir, ignore_errors=True)
         except Exception as e:
-            # remove dangling temporary file
-            if os.path.isfile(temp_file_name):
-                os.remove(temp_file_name)
+            rmtree(temp_dir, ignore_errors=True)
             raise e
 
-        logger.debug("Normalization finished")
+        _logger.debug("Normalization finished")

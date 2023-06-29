@@ -1,21 +1,24 @@
+from __future__ import annotations
+
+import argparse
 import logging
-from platform import system
-from tqdm import tqdm
-from multiprocessing import Lock
 import sys
 
-loggers = {}
+import colorlog
+from tqdm import tqdm
+
+from ffmpeg_normalize import __module_name__ as LOGGER_NAME
 
 
 # https://stackoverflow.com/questions/38543506/
 class TqdmLoggingHandler(logging.StreamHandler):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(sys.stderr)
 
-    def emit(self, record):
+    def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = self.format(record)
-            tqdm.set_lock(Lock())
+            set_mp_lock()
             tqdm.write(msg, file=sys.stderr)
             self.flush()
         except (KeyboardInterrupt, SystemExit):
@@ -24,53 +27,46 @@ class TqdmLoggingHandler(logging.StreamHandler):
             self.handleError(record)
 
 
-def setup_custom_logger(name):
+def set_mp_lock() -> None:
+    try:
+        from multiprocessing import Lock
+
+        tqdm.set_lock(Lock())
+    except (ImportError, OSError):
+        # Some python environments do not support multiprocessing
+        # See: https://github.com/slhck/ffmpeg-normalize/issues/156
+        pass
+
+
+def setup_cli_logger(arguments: argparse.Namespace) -> None:
+    """Configurs the CLI logger.
+
+    Args:
+        arguments (argparse.Namespace): The CLI arguments.
     """
-    Create a logger with a certain name and level
-    """
-    global loggers
 
-    if loggers.get(name):
-        return loggers.get(name)
+    logger = colorlog.getLogger(LOGGER_NAME)
 
-    formatter = logging.Formatter(fmt="%(levelname)s: %(message)s")
-
-    # handler = logging.StreamHandler()
     handler = TqdmLoggingHandler()
-    handler.setFormatter(formatter)
+    handler.setFormatter(
+        colorlog.ColoredFormatter(
+            "%(log_color)s%(levelname)s: %(message)s",
+            log_colors={
+                "DEBUG": "cyan",
+                "INFO": "green",
+                "WARNING": "yellow",
+                "ERROR": "red",
+                "CRITICAL": "red,bg_white",
+            },
+        )
+    )
+    logger.addHandler(handler)
 
-    # \033[1;30m - black
-    # \033[1;31m - red
-    # \033[1;32m - green
-    # \033[1;33m - yellow
-    # \033[1;34m - blue
-    # \033[1;35m - magenta
-    # \033[1;36m - cyan
-    # \033[1;37m - white
-
-    if system() not in ["Windows", "cli"]:
-        logging.addLevelName(
-            logging.ERROR, f"[1;31m{logging.getLevelName(logging.ERROR)}[1;0m"
-        )
-        logging.addLevelName(
-            logging.WARNING,
-            f"[1;33m{logging.getLevelName(logging.WARNING)}[1;0m",
-        )
-        logging.addLevelName(
-            logging.INFO, f"[1;34m{logging.getLevelName(logging.INFO)}[1;0m"
-        )
-        logging.addLevelName(
-            logging.DEBUG, f"[1;35m{logging.getLevelName(logging.DEBUG)}[1;0m"
-        )
-
-    logger = logging.getLogger(name)
     logger.setLevel(logging.WARNING)
 
-    # if (logger.hasHandlers()):
-    #     logger.handlers.clear()
-    if logger.handlers:
-        logger.handlers = []
-    logger.addHandler(handler)
-    loggers.update(dict(name=logger))
-
-    return logger
+    if arguments.quiet:
+        logger.setLevel(logging.ERROR)
+    elif arguments.debug:
+        logger.setLevel(logging.DEBUG)
+    elif arguments.verbose:
+        logger.setLevel(logging.INFO)

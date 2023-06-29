@@ -1,14 +1,16 @@
-import os
-import sys
-import subprocess
-import pytest
 import json
+import os
 import shutil
+import subprocess
+import sys
+from typing import Any, Dict, List, Literal, Tuple, cast
+
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__) + "/../"))
 
 
-def ffmpeg_normalize_call(args):
+def ffmpeg_normalize_call(args: List[str]) -> Tuple[str, str]:
     cmd = [sys.executable, "-m", "ffmpeg_normalize"]
     cmd.extend(args)
 
@@ -23,16 +25,18 @@ def ffmpeg_normalize_call(args):
         raise e
 
 
-def _get_stats(input_file, normalization_type="ebu"):
+def _get_stats(
+    input_file: str, normalization_type: Literal["ebu", "rms", "peak"] = "ebu"
+) -> Dict:
     stdout, _ = ffmpeg_normalize_call(
         [input_file, "-f", "-n", "--print-stats", "-nt", normalization_type]
     )
-    stats = json.loads(stdout)
+    stats = cast(dict, json.loads(stdout))
     print(json.dumps(stats, indent=4))
     return stats
 
 
-def _get_stream_info(input_file):
+def _get_stream_info(input_file: str) -> List[Dict]:
     cmd = [
         "ffprobe",
         "-hide_banner",
@@ -43,12 +47,17 @@ def _get_stream_info(input_file):
         "json",
         "-show_streams",
     ]
-    return json.loads(
-        subprocess.check_output(cmd, stderr=subprocess.STDOUT, universal_newlines=True)
-    )["streams"]
+    return cast(
+        list,
+        json.loads(
+            subprocess.check_output(
+                cmd, stderr=subprocess.STDOUT, universal_newlines=True
+            )
+        )["streams"],
+    )
 
 
-def fuzzy_equal(d1, d2, precision=0.1):
+def fuzzy_equal(d1: Any, d2: Any, precision: float = 0.1) -> bool:
     """
     Compare two objects recursively (just as standard '==' except floating point
     values are compared within given precision.
@@ -139,9 +148,9 @@ class TestFFmpegNormalize:
 
     def test_default_warnings(self):
         _, stderr = ffmpeg_normalize_call(
-            ["test/test.mp4", "-o", "normalized/test2.wav"]
+            ["test/test.mp4", "--dynamic", "-o", "normalized/test2.wav"]
         )
-        assert "The sample rate will automatically be set" in stderr
+        assert "sample rate will automatically be set" in stderr
 
     def test_multiple_outputs(self):
         os.makedirs("normalized", exist_ok=True)
@@ -290,7 +299,10 @@ class TestFFmpegNormalize:
         )
         assert os.path.isfile("normalized/test.aac")
         assert _get_stream_info("normalized/test.aac")[0]["codec_name"] == "aac"
-        assert abs(133000 - float(_get_stream_info("normalized/test.aac")[0]["bit_rate"])) > 10000
+        assert (
+            abs(133000 - float(_get_stream_info("normalized/test.aac")[0]["bit_rate"]))
+            > 10000
+        )
 
     def test_ar(self):
         ffmpeg_normalize_call(["test/test.mp4", "-ar", "48000"])
@@ -350,7 +362,8 @@ class TestFFmpegNormalize:
 
     def test_progress(self):
         _, stderr = ffmpeg_normalize_call(["test/test.mp4", "-pr"])
-        assert "100/100" in stderr
+        assert "0/100" in stderr
+        assert "100/100" in stderr or "100%" in stderr
         assert os.path.isfile("normalized/test.mkv")
 
     def test_duration(self):
